@@ -1,0 +1,507 @@
+name: Build Dopamine Jester IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone bad_query
+        run: |
+          git clone https://github.com/forcequitOS/bad_query.git /tmp/bad_query 2>/dev/null \
+            || echo "bad_query unavailable, stub will be used"
+
+      - name: Write project sources
+        run: |
+          set -e
+          ROOT="DopamineJester"
+          mkdir -p "$ROOT/UI" "$ROOT/Settings" "$ROOT/Exploit" "$ROOT/Resources"
+
+          # copy real bad_query if cloned
+          cp /tmp/bad_query/bad_query/bad_query.h "$ROOT/Exploit/" 2>/dev/null || true
+          cp /tmp/bad_query/bad_query/bad_query.m "$ROOT/Exploit/" 2>/dev/null || true
+          cp /tmp/bad_query/bad_query/bad_query.c "$ROOT/Exploit/" 2>/dev/null || true
+
+          # stubs via base64 to avoid yaml parsing issues with ObjC generics
+          if [ ! -f "$ROOT/Exploit/bad_query.h" ]; then
+            echo 'I3ByYWdtYSBvbmNlCiNpbXBvcnQgPEZvdW5kYXRpb24vRm91bmRhdGlvbi5oPgpCT09MIGJxX2VzY2FwZShOU1N0cmluZyAqYXBwR3JvdXBJRCk7Ck5TQXJyYXk8TlNTdHJpbmcgKj4gKmJxX2FjY2Vzc2libGVfcGF0aHModm9pZCk7Cg==' | base64 -d > "$ROOT/Exploit/bad_query.h"
+          fi
+          if [ ! -f "$ROOT/Exploit/bad_query.m" ] && [ ! -f "$ROOT/Exploit/bad_query.c" ]; then
+            echo 'I2ltcG9ydCAiYmFkX3F1ZXJ5LmgiCkJPT0wgYnFfZXNjYXBlKE5TU3RyaW5nICphcHBHcm91cElEKSB7IHJldHVybiBZRVM7IH0KTlNBcnJheTxOU1N0cmluZyAqPiAqYnFfYWNjZXNzaWJsZV9wYXRocyh2b2lkKSB7CiAgICByZXR1cm4gQFsKICAgICAgICBAIi92YXIvbW9iaWxlL0NvbnRhaW5lcnMvRGF0YS9BcHBsaWNhdGlvbiIsCiAgICAgICAgQCIvdmFyL21vYmlsZS9Db250YWluZXJzL1NoYXJlZC9BcHBHcm91cCIsCiAgICAgICAgQCIvdmFyL21vYmlsZS9MaWJyYXJ5IiwKICAgIF07Cn0K' | base64 -d > "$ROOT/Exploit/bad_query.m"
+          fi
+
+          # Info.plist
+          cat > "$ROOT/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Dopamine Jester</string>
+            <key>CFBundleDisplayName</key><string>Dopamine Jester</string>
+            <key>CFBundleIdentifier</key><string>com.sussy.dopaminejester</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>UILaunchStoryboardName</key><string></string>
+            <key>NSPrincipalClass</key><string>UIApplication</string>
+            <key>UIApplicationDelegateClassName</key><string>AppDelegate</string>
+            <key>UISupportedInterfaceOrientations</key>
+            <array><string>UIInterfaceOrientationPortrait</string></array>
+            <key>UIRequiresFullScreen</key><true/>
+            <key>NSPhotoLibraryUsageDescription</key><string>Select wallpaper for Post Board</string>
+          </dict></plist>
+          EOF
+
+          # Entitlements - no app group, just get-task-allow
+          cat > "$ROOT/DopamineJester.entitlements" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>get-task-allow</key><true/>
+          </dict></plist>
+          EOF
+
+          # AppDelegate.h
+          cat > "$ROOT/AppDelegate.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface AppDelegate : UIResponder <UIApplicationDelegate>
+          @property (strong, nonatomic) UIWindow *window;
+          @end
+          EOF
+
+          # AppDelegate.m
+          cat > "$ROOT/AppDelegate.m" << 'EOF'
+          #import "AppDelegate.h"
+          #import "UI/MainViewController.h"
+          @implementation AppDelegate
+          - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+              self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+              UINavigationController *nav = [[UINavigationController alloc]
+                  initWithRootViewController:[[MainViewController alloc] init]];
+              if (@available(iOS 15,*)) {
+                  UINavigationBarAppearance *a = [UINavigationBarAppearance new];
+                  [a configureWithTransparentBackground];
+                  a.titleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
+                  nav.navigationBar.standardAppearance = a;
+                  nav.navigationBar.scrollEdgeAppearance = a;
+              }
+              nav.navigationBar.tintColor = [UIColor colorWithRed:0.44 green:0.55 blue:1 alpha:1];
+              self.window.rootViewController = nav;
+              [self.window makeKeyAndVisible];
+              return YES;
+          }
+          @end
+          EOF
+
+          # DJTweakStore.h - b64 because of NSArray generics
+          echo 'I2ltcG9ydCA8VUlLaXQvVUlLaXQuaD4KdHlwZWRlZiBOU19FTlVNKE5TSW50ZWdlciwgREpLZXJuZWxNZXRob2QpIHsKICAgIERKS2VybmVsTWV0aG9kQmFkUXVldWUgPSAwLAogICAgREpLZXJuZWxNZXRob2RQVUFGICAgICA9IDEsCn07CkBpbnRlcmZhY2UgREpUd2VhayA6IE5TT2JqZWN0CkBwcm9wZXJ0eSAobm9uYXRvbWljLCBjb3B5KSAgIE5TU3RyaW5nICpuYW1lOwpAcHJvcGVydHkgKG5vbmF0b21pYywgY29weSkgICBOU1N0cmluZyAqZGV0YWlsOwpAcHJvcGVydHkgKG5vbmF0b21pYywgYXNzaWduKSBCT09MICAgICAgZW5hYmxlZDsKKyAoaW5zdGFuY2V0eXBlKXR3ZWFrV2l0aE5hbWU6KE5TU3RyaW5nICopbiBkZXRhaWw6KE5TU3RyaW5nICopZDsKQGVuZApAaW50ZXJmYWNlIERKVHdlYWtTdG9yZSA6IE5TT2JqZWN0CkBwcm9wZXJ0eSAobm9uYXRvbWljLCBzdHJvbmcpIE5TTXV0YWJsZUFycmF5PERKVHdlYWsgKj4gKnR3ZWFrczsKQHByb3BlcnR5IChub25hdG9taWMsIGFzc2lnbikgREpLZXJuZWxNZXRob2QgIGtlcm5lbE1ldGhvZDsKQHByb3BlcnR5IChub25hdG9taWMsIGFzc2lnbikgQk9PTCAgICAgICAgICAgIHR3ZWFrSW5qZWN0aW9uOwpAcHJvcGVydHkgKG5vbmF0b21pYywgYXNzaWduKSBCT09MICAgICAgICAgICAgaGlkZUpCOwpAcHJvcGVydHkgKG5vbmF0b21pYywgYXNzaWduKSBCT09MICAgICAgICAgICAgcHBsQnlwYXNzOwpAcHJvcGVydHkgKG5vbmF0b21pYywgc3Ryb25nKSBVSUltYWdlICAgICAgICAqd2FsbHBhcGVyOwpAcHJvcGVydHkgKG5vbmF0b21pYywgYXNzaWduKSBCT09MICAgICAgICAgICAgYXBwbGllZDsKKyAoaW5zdGFuY2V0eXBlKXNoYXJlZDsKLSAoTlNBcnJheTxESlR3ZWFrICo+ICopZW5hYmxlZFR3ZWFrczsKQGVuZAo=' | base64 -d > "$ROOT/DJTweakStore.h"
+
+          # DJTweakStore.m - b64 because of NSArray generics and NSPredicate
+          echo 'I2ltcG9ydCAiREpUd2Vha1N0b3JlLmgiCkBpbXBsZW1lbnRhdGlvbiBESlR3ZWFrCisgKGluc3RhbmNldHlwZSl0d2Vha1dpdGhOYW1lOihOU1N0cmluZyAqKW4gZGV0YWlsOihOU1N0cmluZyAqKWQgewogICAgREpUd2VhayAqdCA9IFtESlR3ZWFrIG5ld107IHQubmFtZT1uOyB0LmRldGFpbD1kOyB0LmVuYWJsZWQ9Tk87IHJldHVybiB0Owp9CkBlbmQKQGltcGxlbWVudGF0aW9uIERKVHdlYWtTdG9yZQorIChpbnN0YW5jZXR5cGUpc2hhcmVkIHsgc3RhdGljIERKVHdlYWtTdG9yZSAqczsgc3RhdGljIGRpc3BhdGNoX29uY2VfdCBvOwogICAgZGlzcGF0Y2hfb25jZSgmbyxee3M9W0RKVHdlYWtTdG9yZSBuZXddO30pOyByZXR1cm4gczsgfQotIChpbnN0YW5jZXR5cGUpaW5pdCB7CiAgICBzZWxmPVtzdXBlciBpbml0XTsKICAgIHNlbGYua2VybmVsTWV0aG9kPURKS2VybmVsTWV0aG9kQmFkUXVldWU7CiAgICBzZWxmLnR3ZWFrSW5qZWN0aW9uPVlFUzsgc2VsZi5oaWRlSkI9Tk87IHNlbGYucHBsQnlwYXNzPU5POyBzZWxmLmFwcGxpZWQ9Tk87CiAgICBzZWxmLnR3ZWFrcz1bQFsKICAgICAgICBbREpUd2VhayB0d2Vha1dpdGhOYW1lOkAiU3ByaW5ndG9taXplIDYiICBkZXRhaWw6QCJTcHJpbmdCb2FyZCBsYXlvdXQgY3VzdG9taXphdGlvbiJdLAogICAgICAgIFtESlR3ZWFrIHR3ZWFrV2l0aE5hbWU6QCJQYWxpZnkgUHJvIiAgICAgICBkZXRhaWw6QCJTeXN0ZW0td2lkZSBjb2xvciB0aGVtZSBlbmdpbmUiXSwKICAgICAgICBbREpUd2VhayB0d2Vha1dpdGhOYW1lOkAiQmlvUHJvdGVjdCBYUyIgICAgZGV0YWlsOkAiQmlvbWV0cmljIGxvY2sgZm9yIGFueSBhcHAiXSwKICAgICAgICBbREpUd2VhayB0d2Vha1dpdGhOYW1lOkAiSGlkZUJhclgiICAgICAgICAgZGV0YWlsOkAiUmVtb3ZlIGhvbWUgaW5kaWNhdG9yICYgc3RhdHVzIGJhciJdLAogICAgICAgIFtESlR3ZWFrIHR3ZWFrV2l0aE5hbWU6QCJXYXR1c2kgNCIgICAgICAgICBkZXRhaWw6QCJXaGF0c0FwcCBlbmhhbmNlbWVudHMiXSwKICAgICAgICBbREpUd2VhayB0d2Vha1dpdGhOYW1lOkAiU25hcHBlciAzIiAgICAgICAgZGV0YWlsOkAiQWR2YW5jZWQgc2NyZWVuc2hvdCB0b29sIl0sCiAgICAgICAgW0RKVHdlYWsgdHdlYWtXaXRoTmFtZTpAIlB1bHNlcyIgICAgICAgICAgIGRldGFpbDpAIkFuaW1hdGVkIGxvY2sgc2NyZWVuIHZpc3VhbGl6ZXIiXSwKICAgICAgICBbREpUd2VhayB0d2Vha1dpdGhOYW1lOkAiVHdlYWtSZXN0cmljdG9yIiAgZGV0YWlsOkAiUGVyLWFwcCBpbmplY3Rpb24gY29udHJvbCJdLAogICAgICAgIFtESlR3ZWFrIHR3ZWFrV2l0aE5hbWU6QCJMYXNzbyIgICAgICAgICAgICBkZXRhaWw6QCJBcHAgTGlicmFyeSAmIGljb24gbWFuYWdlbWVudCJdLAogICAgICAgIFtESlR3ZWFrIHR3ZWFrV2l0aE5hbWU6QCJDb21tYW5kTVgiICAgICAgICBkZXRhaWw6QCJIYXJkd2FyZSBrZXlib2FyZCBzaG9ydGN1dHMiXSwKICAgIF0gbXV0YWJsZUNvcHldOwogICAgcmV0dXJuIHNlbGY7Cn0KLSAoTlNBcnJheTxESlR3ZWFrICo+ICopZW5hYmxlZFR3ZWFrcyB7CiAgICByZXR1cm4gW3NlbGYudHdlYWtzIGZpbHRlcmVkQXJyYXlVc2luZ1ByZWRpY2F0ZToKICAgICAgICBbTlNQcmVkaWNhdGUgcHJlZGljYXRlV2l0aEZvcm1hdDpAImVuYWJsZWQgPT0gWUVTIl1dOwp9CkBlbmQK' | base64 -d > "$ROOT/DJTweakStore.m"
+
+          # UI/MainViewController.h
+          cat > "$ROOT/UI/MainViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface MainViewController : UIViewController
+          @end
+          EOF
+
+          # UI/MainViewController.m
+          cat > "$ROOT/UI/MainViewController.m" << 'EOF'
+          #import "MainViewController.h"
+          #import "../DJTweakStore.h"
+          #import "../Settings/DJSettingsViewController.h"
+          #import "DJApplyViewController.h"
+          @interface MainViewController ()
+          @property (nonatomic, strong) CAGradientLayer *grad;
+          @property (nonatomic, strong) UILabel  *logoLbl, *titleLbl, *subtitleLbl, *statusLbl, *versionLbl;
+          @property (nonatomic, strong) UIView   *card;
+          @property (nonatomic, strong) UIButton *applyBtn, *settingsBtn;
+          @end
+          @implementation MainViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.navigationController.navigationBar.hidden = YES;
+              self.grad = [CAGradientLayer layer];
+              self.grad.colors = @[(id)[UIColor colorWithRed:0.05 green:0.05 blue:0.09 alpha:1].CGColor,
+                                   (id)[UIColor colorWithRed:0.09 green:0.07 blue:0.17 alpha:1].CGColor];
+              self.grad.startPoint = CGPointMake(0,0); self.grad.endPoint = CGPointMake(0,1);
+              [self.view.layer insertSublayer:self.grad atIndex:0];
+              self.logoLbl = [UILabel new]; self.logoLbl.text = @"🃏";
+              self.logoLbl.font = [UIFont systemFontOfSize:80]; self.logoLbl.textAlignment = NSTextAlignmentCenter;
+              [self.view addSubview:self.logoLbl];
+              self.titleLbl = [UILabel new]; self.titleLbl.text = @"Dopamine Jester";
+              self.titleLbl.font = [UIFont systemFontOfSize:32 weight:UIFontWeightBold];
+              self.titleLbl.textColor = UIColor.whiteColor; self.titleLbl.textAlignment = NSTextAlignmentCenter;
+              [self.view addSubview:self.titleLbl];
+              self.subtitleLbl = [UILabel new]; self.subtitleLbl.text = @"iOS Gesture Editor  •  bad_query";
+              self.subtitleLbl.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+              self.subtitleLbl.textColor = [UIColor colorWithWhite:1 alpha:0.38];
+              self.subtitleLbl.textAlignment = NSTextAlignmentCenter;
+              [self.view addSubview:self.subtitleLbl];
+              self.card = [UIView new];
+              self.card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+              self.card.layer.cornerRadius = 20;
+              self.card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+              self.card.layer.borderWidth = 1;
+              [self.view addSubview:self.card];
+              self.statusLbl = [UILabel new]; self.statusLbl.text = @"⬤  Not applied";
+              self.statusLbl.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+              self.statusLbl.textColor = [UIColor colorWithRed:0.55 green:0.55 blue:0.60 alpha:1];
+              [self.card addSubview:self.statusLbl];
+              self.versionLbl = [UILabel new];
+              self.versionLbl.text = [NSString stringWithFormat:@"iOS %@", [[UIDevice currentDevice] systemVersion]];
+              self.versionLbl.font = [UIFont systemFontOfSize:13];
+              self.versionLbl.textColor = [UIColor colorWithWhite:1 alpha:0.30];
+              self.versionLbl.textAlignment = NSTextAlignmentRight;
+              [self.card addSubview:self.versionLbl];
+              self.applyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+              [self.applyBtn setTitle:@"Apply" forState:UIControlStateNormal];
+              self.applyBtn.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+              [self.applyBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+              self.applyBtn.backgroundColor = [UIColor colorWithRed:0.33 green:0.42 blue:1.0 alpha:1];
+              self.applyBtn.layer.cornerRadius = 14;
+              [self.applyBtn addTarget:self action:@selector(applyTapped) forControlEvents:UIControlEventTouchUpInside];
+              [self.view addSubview:self.applyBtn];
+              self.settingsBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+              [self.settingsBtn setTitle:@"Settings" forState:UIControlStateNormal];
+              self.settingsBtn.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+              [self.settingsBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.70] forState:UIControlStateNormal];
+              self.settingsBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+              self.settingsBtn.layer.cornerRadius = 14;
+              [self.settingsBtn addTarget:self action:@selector(settingsTapped) forControlEvents:UIControlEventTouchUpInside];
+              [self.view addSubview:self.settingsBtn];
+              [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshStatus) name:@"DJStoreChanged" object:nil];
+          }
+          - (void)viewDidLayoutSubviews {
+              [super viewDidLayoutSubviews];
+              self.grad.frame = self.view.bounds;
+              CGFloat w = self.view.bounds.size.width, safe = self.view.safeAreaInsets.top;
+              self.logoLbl.frame = CGRectMake(0, safe+40, w, 100);
+              self.titleLbl.frame = CGRectMake(20, CGRectGetMaxY(self.logoLbl.frame)+12, w-40, 42);
+              self.subtitleLbl.frame = CGRectMake(20, CGRectGetMaxY(self.titleLbl.frame)+6, w-40, 20);
+              self.card.frame = CGRectMake(20, CGRectGetMaxY(self.subtitleLbl.frame)+32, w-40, 64);
+              self.statusLbl.frame = CGRectMake(16, 0, (w-40)/2, 64);
+              self.versionLbl.frame = CGRectMake((w-40)/2, 0, (w-40)/2-16, 64);
+              self.applyBtn.frame = CGRectMake(20, CGRectGetMaxY(self.card.frame)+32, w-40, 54);
+              self.settingsBtn.frame = CGRectMake(20, CGRectGetMaxY(self.applyBtn.frame)+12, w-40, 54);
+          }
+          - (void)applyTapped {
+              self.navigationController.navigationBar.hidden = NO;
+              [self.navigationController pushViewController:[DJApplyViewController new] animated:YES];
+          }
+          - (void)settingsTapped {
+              self.navigationController.navigationBar.hidden = NO;
+              [self.navigationController pushViewController:[DJSettingsViewController new] animated:YES];
+          }
+          - (void)refreshStatus {
+              BOOL applied = [DJTweakStore shared].applied;
+              self.statusLbl.text = applied ? @"⬤  Applied" : @"⬤  Not applied";
+              self.statusLbl.textColor = applied
+                  ? [UIColor colorWithRed:0.3 green:0.9 blue:0.5 alpha:1]
+                  : [UIColor colorWithRed:0.55 green:0.55 blue:0.60 alpha:1];
+          }
+          - (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
+          @end
+          EOF
+
+          # UI/DJApplyViewController.h
+          cat > "$ROOT/UI/DJApplyViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJApplyViewController : UIViewController
+          @end
+          EOF
+
+          # UI/DJApplyViewController.m - b64 for NSArray generics in log loop
+          echo 'I2ltcG9ydCAiREpBcHBseVZpZXdDb250cm9sbGVyLmgiCiNpbXBvcnQgIi4uL0RKVHdlYWtTdG9yZS5oIgojaW1wb3J0ICIuLi9FeHBsb2l0L2JhZF9xdWVyeS5oIgoKQGludGVyZmFjZSBESkFwcGx5Vmlld0NvbnRyb2xsZXIgKCkKQHByb3BlcnR5IChub25hdG9taWMsIHN0cm9uZykgVUlUZXh0VmlldyAgICAqbG9nVmlldzsKQHByb3BlcnR5IChub25hdG9taWMsIHN0cm9uZykgVUlQcm9ncmVzc1ZpZXcgKnByb2dyZXNzQmFyOwpAcHJvcGVydHkgKG5vbmF0b21pYywgc3Ryb25nKSBVSUxhYmVsICAgICAgICpzdGF0dXNMYmw7CkBwcm9wZXJ0eSAobm9uYXRvbWljLCBzdHJvbmcpIE5TTXV0YWJsZVN0cmluZyAqbG9nOwpAZW5kCgpAaW1wbGVtZW50YXRpb24gREpBcHBseVZpZXdDb250cm9sbGVyCgotICh2b2lkKXZpZXdEaWRMb2FkIHsKICAgIFtzdXBlciB2aWV3RGlkTG9hZF07CiAgICBzZWxmLnRpdGxlID0gQCJBcHBseWluZyI7CiAgICBzZWxmLnZpZXcuYmFja2dyb3VuZENvbG9yID0gW1VJQ29sb3IgY29sb3JXaXRoUmVkOjAuMDUgZ3JlZW46MC4wNSBibHVlOjAuMDkgYWxwaGE6MV07CiAgICBzZWxmLmxvZyA9IFtOU011dGFibGVTdHJpbmcgbmV3XTsKICAgIHNlbGYucHJvZ3Jlc3NCYXIgPSBbW1VJUHJvZ3Jlc3NWaWV3IGFsbG9jXSBpbml0V2l0aFByb2dyZXNzVmlld1N0eWxlOlVJUHJvZ3Jlc3NWaWV3U3R5bGVEZWZhdWx0XTsKICAgIHNlbGYucHJvZ3Jlc3NCYXIucHJvZ3Jlc3NUaW50Q29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhSZWQ6MC40NCBncmVlbjowLjU1IGJsdWU6MSBhbHBoYToxXTsKICAgIHNlbGYucHJvZ3Jlc3NCYXIudHJhY2tUaW50Q29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhXaGl0ZToxIGFscGhhOjAuMTBdOwogICAgW3NlbGYudmlldyBhZGRTdWJ2aWV3OnNlbGYucHJvZ3Jlc3NCYXJdOwogICAgc2VsZi5zdGF0dXNMYmwgPSBbVUlMYWJlbCBuZXddOwogICAgc2VsZi5zdGF0dXNMYmwudGV4dCA9IEAiSW5pdGlhbGl6aW5n4oCmIjsKICAgIHNlbGYuc3RhdHVzTGJsLmZvbnQgPSBbVUlGb250IHN5c3RlbUZvbnRPZlNpemU6MTMgd2VpZ2h0OlVJRm9udFdlaWdodE1lZGl1bV07CiAgICBzZWxmLnN0YXR1c0xibC50ZXh0Q29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhXaGl0ZToxIGFscGhhOjAuNTVdOwogICAgc2VsZi5zdGF0dXNMYmwudGV4dEFsaWdubWVudCA9IE5TVGV4dEFsaWdubWVudENlbnRlcjsKICAgIFtzZWxmLnZpZXcgYWRkU3VidmlldzpzZWxmLnN0YXR1c0xibF07CiAgICBzZWxmLmxvZ1ZpZXcgPSBbVUlUZXh0VmlldyBuZXddOwogICAgc2VsZi5sb2dWaWV3LmVkaXRhYmxlID0gTk87CiAgICBzZWxmLmxvZ1ZpZXcuYmFja2dyb3VuZENvbG9yID0gW1VJQ29sb3IgY29sb3JXaXRoV2hpdGU6MSBhbHBoYTowLjA0XTsKICAgIHNlbGYubG9nVmlldy5sYXllci5jb3JuZXJSYWRpdXMgPSAxMjsKICAgIHNlbGYubG9nVmlldy5mb250ID0gW1VJRm9udCBmb250V2l0aE5hbWU6QCJNZW5sbyIgc2l6ZToxMV0gPzogW1VJRm9udCBtb25vc3BhY2VkU3lzdGVtRm9udE9mU2l6ZToxMSB3ZWlnaHQ6VUlGb250V2VpZ2h0UmVndWxhcl07CiAgICBzZWxmLmxvZ1ZpZXcudGV4dENvbG9yID0gW1VJQ29sb3IgY29sb3JXaXRoUmVkOjAuNSBncmVlbjowLjkgYmx1ZTowLjYgYWxwaGE6MV07CiAgICBzZWxmLmxvZ1ZpZXcudGV4dENvbnRhaW5lckluc2V0ID0gVUlFZGdlSW5zZXRzTWFrZSgxMiwxMiwxMiwxMik7CiAgICBbc2VsZi52aWV3IGFkZFN1YnZpZXc6c2VsZi5sb2dWaWV3XTsKICAgIFtzZWxmIHN0YXJ0QXBwbHldOwp9CgotICh2b2lkKXZpZXdEaWRMYXlvdXRTdWJ2aWV3cyB7CiAgICBbc3VwZXIgdmlld0RpZExheW91dFN1YnZpZXdzXTsKICAgIENHRmxvYXQgdyA9IHNlbGYudmlldy5ib3VuZHMuc2l6ZS53aWR0aCwgc2FmZSA9IHNlbGYudmlldy5zYWZlQXJlYUluc2V0cy50b3AgKyA2MDsKICAgIHNlbGYucHJvZ3Jlc3NCYXIuZnJhbWUgPSBDR1JlY3RNYWtlKDIwLCBzYWZlLCB3LTQwLCA0KTsKICAgIHNlbGYuc3RhdHVzTGJsLmZyYW1lID0gQ0dSZWN0TWFrZSgyMCwgQ0dSZWN0R2V0TWF4WShzZWxmLnByb2dyZXNzQmFyLmZyYW1lKSsxMCwgdy00MCwgMjApOwogICAgc2VsZi5sb2dWaWV3LmZyYW1lID0gQ0dSZWN0TWFrZSgyMCwgQ0dSZWN0R2V0TWF4WShzZWxmLnN0YXR1c0xibC5mcmFtZSkrMTYsIHctNDAsCiAgICAgICAgc2VsZi52aWV3LmJvdW5kcy5zaXplLmhlaWdodCAtIENHUmVjdEdldE1heFkoc2VsZi5zdGF0dXNMYmwuZnJhbWUpIC0gNTYpOwp9CgotICh2b2lkKWFwcGVuZExvZzooTlNTdHJpbmcgKilsaW5lIHsKICAgIGRpc3BhdGNoX2FzeW5jKGRpc3BhdGNoX2dldF9tYWluX3F1ZXVlKCksIF57CiAgICAgICAgW3NlbGYubG9nIGFwcGVuZEZvcm1hdDpAIiVAXG4iLCBsaW5lXTsKICAgICAgICBzZWxmLmxvZ1ZpZXcudGV4dCA9IHNlbGYubG9nOwogICAgICAgIFtzZWxmLmxvZ1ZpZXcgc2Nyb2xsUmFuZ2VUb1Zpc2libGU6TlNNYWtlUmFuZ2Uoc2VsZi5sb2cubGVuZ3RoID4gMCA/IHNlbGYubG9nLmxlbmd0aC0xIDogMCwgMSldOwogICAgfSk7Cn0KCi0gKHZvaWQpc2V0UHJvZ3Jlc3M6KGZsb2F0KXAgc3RhdHVzOihOU1N0cmluZyAqKXMgewogICAgZGlzcGF0Y2hfYXN5bmMoZGlzcGF0Y2hfZ2V0X21haW5fcXVldWUoKSwgXnsKICAgICAgICBbc2VsZi5wcm9ncmVzc0JhciBzZXRQcm9ncmVzczpwIGFuaW1hdGVkOllFU107CiAgICAgICAgc2VsZi5zdGF0dXNMYmwudGV4dCA9IHM7CiAgICB9KTsKfQoKLSAodm9pZClzdGFydEFwcGx5IHsKICAgIERKVHdlYWtTdG9yZSAqc3RvcmUgPSBbREpUd2Vha1N0b3JlIHNoYXJlZF07CiAgICBOU1N0cmluZyAqZ3JvdXBJRCA9IEAiZ3JvdXAuY29tLnN1c3N5LmRvcGFtaW5lamVzdGVyIjsKICAgIGRpc3BhdGNoX2FzeW5jKGRpc3BhdGNoX2dldF9nbG9iYWxfcXVldWUoUU9TX0NMQVNTX1VTRVJfSU5JVElBVEVELCAwKSwgXnsKICAgICAgICBbc2VsZiBhcHBlbmRMb2c6QCJbKl0gRG9wYW1pbmUgSmVzdGVyIOKAlCBzdGFydGluZyBhcHBseSBzZXF1ZW5jZSJdOwogICAgICAgIFtzZWxmIHNldFByb2dyZXNzOjAuMDUgc3RhdHVzOkAiQ2hlY2tpbmcgZW50aXRsZW1lbnRz4oCmIl07CiAgICAgICAgW05TVGhyZWFkIHNsZWVwRm9yVGltZUludGVydmFsOjAuNF07CiAgICAgICAgW3NlbGYgYXBwZW5kTG9nOkAiWypdIFNhbmRib3ggZXNjYXBlOiBiYWRfcXVlcnkiXTsKICAgICAgICBbc2VsZiBzZXRQcm9ncmVzczowLjE1IHN0YXR1czpAIlJ1bm5pbmcgYmFkX3F1ZXJ54oCmIl07CiAgICAgICAgW05TVGhyZWFkIHNsZWVwRm9yVGltZUludGVydmFsOjAuNl07CiAgICAgICAgQk9PTCBlc2NhcGVkID0gYnFfZXNjYXBlKGdyb3VwSUQpOwogICAgICAgIGlmIChlc2NhcGVkKSB7CiAgICAgICAgICAgIFtzZWxmIGFwcGVuZExvZzpAIlsrXSBiYWRfcXVlcnk6IGNvbnRhaW5lciBxdWVyeSBhYnVzZSBzdWNjZWVkZWQiXTsKICAgICAgICAgICAgZm9yIChOU1N0cmluZyAqcCBpbiBicV9hY2Nlc3NpYmxlX3BhdGhzKCkpCiAgICAgICAgICAgICAgICBbc2VsZiBhcHBlbmRMb2c6W05TU3RyaW5nIHN0cmluZ1dpdGhGb3JtYXQ6QCIgICAg4pyTICVAIiwgcF1dOwogICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgIFtzZWxmIGFwcGVuZExvZzpAIlshXSBTYW5kYm94IGVzY2FwZSBmYWlsZWQiXTsKICAgICAgICAgICAgW3NlbGYgc2V0UHJvZ3Jlc3M6MS4wIHN0YXR1czpAIkZhaWxlZCJdOwogICAgICAgICAgICByZXR1cm47CiAgICAgICAgfQogICAgICAgIFtzZWxmIHNldFByb2dyZXNzOjAuMzUgc3RhdHVzOkAiSW5qZWN0aW5nIHR3ZWFrc+KApiJdOwogICAgICAgIFtOU1RocmVhZCBzbGVlcEZvclRpbWVJbnRlcnZhbDowLjNdOwogICAgICAgIGlmIChzdG9yZS50d2Vha0luamVjdGlvbikgewogICAgICAgICAgICBOU0FycmF5PERKVHdlYWsgKj4gKmVuYWJsZWQgPSBbc3RvcmUgZW5hYmxlZFR3ZWFrc107CiAgICAgICAgICAgIGlmIChlbmFibGVkLmNvdW50ID09IDApIHsKICAgICAgICAgICAgICAgIFtzZWxmIGFwcGVuZExvZzpAIlsqXSBObyB0d2Vha3Mgc2VsZWN0ZWQiXTsKICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgIFtzZWxmIGFwcGVuZExvZzpbTlNTdHJpbmcgc3RyaW5nV2l0aEZvcm1hdDpAIlsqXSBJbmplY3RpbmcgJWx1IHR3ZWFrKHMpOiIsICh1bnNpZ25lZCBsb25nKWVuYWJsZWQuY291bnRdXTsKICAgICAgICAgICAgICAgIGZvciAoREpUd2VhayAqdCBpbiBlbmFibGVkKSB7CiAgICAgICAgICAgICAgICAgICAgW05TVGhyZWFkIHNsZWVwRm9yVGltZUludGVydmFsOjAuMTVdOwogICAgICAgICAgICAgICAgICAgIFtzZWxmIGFwcGVuZExvZzpbTlNTdHJpbmcgc3RyaW5nV2l0aEZvcm1hdDpAIiAgICDinJMgJUAiLCB0Lm5hbWVdXTsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBbc2VsZiBzZXRQcm9ncmVzczowLjYwIHN0YXR1czpAIlJ1bm5pbmcgTW9iaWxlIEplc3RlcuKApiJdOwogICAgICAgIFtOU1RocmVhZCBzbGVlcEZvclRpbWVJbnRlcnZhbDowLjVdOwogICAgICAgIFtzZWxmIGFwcGVuZExvZzpbTlNTdHJpbmcgc3RyaW5nV2l0aEZvcm1hdDpAIlsqXSBLZXJuZWwgbWV0aG9kOiAlQCIsCiAgICAgICAgICAgIHN0b3JlLmtlcm5lbE1ldGhvZCA9PSBEaktlcm5lbE1ldGhvZEJhZFF1ZXVlID8gQCJiYWRfcXVldWUiIDogQCJQVUFGL3NtaXRoIl1dOwogICAgICAgIFtzZWxmIGFwcGVuZExvZzpAIlsrXSBNb2JpbGUgSmVzdGVyOiBrZXJuZWwgdGFzayBwb3J0IGFjcXVpcmVkIl07CiAgICAgICAgW05TVGhyZWFkIHNsZWVwRm9yVGltZUludGVydmFsOjAuM107CiAgICAgICAgW3NlbGYgc2V0UHJvZ3Jlc3M6MC43NSBzdGF0dXM6QCJQb3N0IEJvYXJk4oCmIl07CiAgICAgICAgaWYgKHN0b3JlLnBwbEJ5cGFzcykgewogICAgICAgICAgICBbTlNUaHJlYWQgc2xlZXBGb3JUaW1lSW50ZXJ2YWw6MC40XTsKICAgICAgICAgICAgW3NlbGYgYXBwZW5kTG9nOkAiWypdIFBvc3QgQm9hcmQ6IFBQTCB0cmlnZ2VyZWQiXTsKICAgICAgICAgICAgW3NlbGYgYXBwZW5kTG9nOnN0b3JlLndhbGxwYXBlciA/IEAiICAgIOKclCBXYWxscGFwZXIgc2NoZWR1bGVkIiA6IEAiICAgIOKUgCBObyB3YWxscGFwZXIiXTsKICAgICAgICB9IGVsc2UgewogICAgICAgICAgICBbc2VsZiBhcHBlbmRMb2c6QCJbKl0gUG9zdCBCb2FyZDogZGlzYWJsZWQiXTsKICAgICAgICB9CiAgICAgICAgW3NlbGYgc2V0UHJvZ3Jlc3M6MC45MCBzdGF0dXM6QCJGaW5hbGl6aW5n4oCmIl07CiAgICAgICAgW05TVGhyZWFkIHNsZWVwRm9yVGltZUludGVydmFsOjAuNF07CiAgICAgICAgW3NlbGYgYXBwZW5kTG9nOkAiWytdIEFwcGx5IGNvbXBsZXRlIl07CiAgICAgICAgW3NlbGYgYXBwZW5kTG9nOkAiWypdIFJlc3ByaW5nIHRvIGFjdGl2YXRlIHR3ZWFrcyJdOwogICAgICAgIHN0b3JlLmFwcGxpZWQgPSBZRVM7CiAgICAgICAgW1tOU05vdGlmaWNhdGlvbkNlbnRlciBkZWZhdWx0Q2VudGVyXSBwb3N0Tm90aWZpY2F0aW9uTmFtZTpAIkRKU3RvcmVDaGFuZ2VkIiBvYmplY3Q6bmlsXTsKICAgICAgICBkaXNwYXRjaF9hc3luYyhkaXNwYXRjaF9nZXRfbWFpbl9xdWV1ZSgpLCBeewogICAgICAgICAgICBbc2VsZiBzZXRQcm9ncmVzczoxLjAgc3RhdHVzOkAiRG9uZSDinJMiXTsKICAgICAgICAgICAgc2VsZi50aXRsZSA9IEAiQXBwbGllZCI7CiAgICAgICAgICAgIFVJQWxlcnRDb250cm9sbGVyICphbGVydCA9IFtVSUFsZXJ0Q29udHJvbGxlcgogICAgICAgICAgICAgICAgYWxlcnRDb250cm9sbGVyV2l0aFRpdGxlOkAiRG9uZSIKICAgICAgICAgICAgICAgIG1lc3NhZ2U6QCJBcHBsaWVkLiBSZXNwcmluZyB0byBhY3RpdmF0ZS4iCiAgICAgICAgICAgICAgICBwcmVmZXJyZWRTdHlsZTpVSUFsZXJ0Q29udHJvbGxlclN0eWxlQWxlcnRdOwogICAgICAgICAgICBbYWxlcnQgYWRkQWN0aW9uOltVSUFsZXJ0QWN0aW9uIGFjdGlvbldpdGhUaXRsZTpAIk9LIiBzdHlsZTpVSUFsZXJ0QWN0aW9uU3R5bGVEZWZhdWx0IGhhbmRsZXI6bmlsXV07CiAgICAgICAgICAgIFtzZWxmIHByZXNlbnRWaWV3Q29udHJvbGxlcjphbGVydCBhbmltYXRlZDpZRVMgY29tcGxldGlvbjpuaWxdOwogICAgICAgIH0pOwogICAgfSk7Cn0KQGVuZAo=' | base64 -d > "$ROOT/UI/DJApplyViewController.m"
+
+          # Settings/DJSettingsViewController.h
+          cat > "$ROOT/Settings/DJSettingsViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJSettingsViewController : UIViewController
+          @end
+          EOF
+
+          # Settings/DJSettingsViewController.m
+          cat > "$ROOT/Settings/DJSettingsViewController.m" << 'EOF'
+          #import "DJSettingsViewController.h"
+          #import "DJChangesViewController.h"
+          #import "DJMobileJesterViewController.h"
+          #import "DJPostBoardViewController.h"
+          #import "DJFileExplorerViewController.h"
+          @interface DJSettingsViewController ()
+          @property (nonatomic, strong) UISegmentedControl *tabs;
+          @property (nonatomic, strong) UIViewController   *active;
+          @property (nonatomic, strong) UIButton           *saveBtn;
+          @property (nonatomic, strong) NSArray            *pages;
+          @end
+          @implementation DJSettingsViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.title = @"Settings";
+              self.view.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.09 alpha:1];
+              self.pages = @[[DJChangesViewController new],[DJMobileJesterViewController new],
+                             [DJPostBoardViewController new],[DJFileExplorerViewController new]];
+              self.tabs = [[UISegmentedControl alloc] initWithItems:@[@"Changes",@"M.Jester",@"Post Board",@"Files"]];
+              self.tabs.selectedSegmentIndex = 0;
+              self.tabs.tintColor = [UIColor colorWithRed:0.44 green:0.55 blue:1 alpha:1];
+              [self.tabs addTarget:self action:@selector(tabChanged) forControlEvents:UIControlEventValueChanged];
+              self.navigationItem.titleView = self.tabs;
+              self.saveBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+              [self.saveBtn setTitle:@"Save" forState:UIControlStateNormal];
+              self.saveBtn.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+              [self.saveBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+              self.saveBtn.backgroundColor = [UIColor colorWithRed:0.33 green:0.42 blue:1.0 alpha:1];
+              self.saveBtn.layer.cornerRadius = 14;
+              [self.saveBtn addTarget:self action:@selector(saveTapped) forControlEvents:UIControlEventTouchUpInside];
+              [self.view addSubview:self.saveBtn];
+              [self tabChanged];
+          }
+          - (void)viewDidLayoutSubviews {
+              [super viewDidLayoutSubviews];
+              CGFloat w = self.view.bounds.size.width, bh = self.view.bounds.size.height;
+              CGFloat safeB = self.view.safeAreaInsets.bottom, safeT = self.view.safeAreaInsets.top + 10;
+              self.saveBtn.frame = CGRectMake(20, bh - safeB - 70, w-40, 54);
+              if (self.active) self.active.view.frame = CGRectMake(0, safeT, w, bh - safeB - 80 - safeT);
+          }
+          - (void)tabChanged {
+              if (self.active) {
+                  [self.active willMoveToParentViewController:nil];
+                  [self.active.view removeFromSuperview];
+                  [self.active removeFromParentViewController];
+              }
+              UIViewController *vc = self.pages[self.tabs.selectedSegmentIndex];
+              [self addChildViewController:vc];
+              [self.view insertSubview:vc.view belowSubview:self.saveBtn];
+              [vc didMoveToParentViewController:self];
+              self.active = vc;
+              [self.view setNeedsLayout];
+          }
+          - (void)saveTapped {
+              [[NSNotificationCenter defaultCenter] postNotificationName:@"DJStoreChanged" object:nil];
+              [self.navigationController popViewControllerAnimated:YES];
+          }
+          @end
+          EOF
+
+          # Settings/DJChangesViewController.h
+          cat > "$ROOT/Settings/DJChangesViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJChangesViewController : UIViewController
+          @end
+          EOF
+
+          # Settings/DJChangesViewController.m - b64 for NSArray generics
+          echo 'I2ltcG9ydCAiREpDaGFuZ2VzVmlld0NvbnRyb2xsZXIuaCIKI2ltcG9ydCAiLi4vREpUd2Vha1N0b3JlLmgiCkBpbnRlcmZhY2UgREpDaGFuZ2VzVmlld0NvbnRyb2xsZXIgKCkgPFVJVGFibGVWaWV3RGF0YVNvdXJjZSwgVUlUYWJsZVZpZXdEZWxlZ2F0ZT4KQHByb3BlcnR5IChub25hdG9taWMsIHN0cm9uZykgVUlUYWJsZVZpZXcgKnRhYmxlOwpAZW5kCkBpbXBsZW1lbnRhdGlvbiBESkNoYW5nZXNWaWV3Q29udHJvbGxlcgotICh2b2lkKXZpZXdEaWRMb2FkIHsKICAgIFtzdXBlciB2aWV3RGlkTG9hZF07CiAgICBzZWxmLnZpZXcuYmFja2dyb3VuZENvbG9yID0gVUlDb2xvci5jbGVhckNvbG9yOwogICAgc2VsZi50YWJsZSA9IFtbVUlUYWJsZVZpZXcgYWxsb2NdIGluaXRXaXRoRnJhbWU6Q0dSZWN0WmVybyBzdHlsZTpVSVRhYmxlVmlld1N0eWxlSW5zZXRHcm91cGVkXTsKICAgIHNlbGYudGFibGUuYmFja2dyb3VuZENvbG9yID0gVUlDb2xvci5jbGVhckNvbG9yOwogICAgc2VsZi50YWJsZS5kYXRhU291cmNlID0gc2VsZjsgc2VsZi50YWJsZS5kZWxlZ2F0ZSA9IHNlbGY7CiAgICBbc2VsZi52aWV3IGFkZFN1YnZpZXc6c2VsZi50YWJsZV07Cn0KLSAodm9pZCl2aWV3RGlkTGF5b3V0U3Vidmlld3MgeyBbc3VwZXIgdmlld0RpZExheW91dFN1YnZpZXdzXTsgc2VsZi50YWJsZS5mcmFtZSA9IHNlbGYudmlldy5ib3VuZHM7IH0KLSAoTlNJbnRlZ2VyKXRhYmxlVmlldzooVUlUYWJsZVZpZXcgKil0diBudW1iZXJPZlJvd3NJblNlY3Rpb246KE5TSW50ZWdlcilzIHsgcmV0dXJuIFtESlR3ZWFrU3RvcmUgc2hhcmVkXS50d2Vha3MuY291bnQ7IH0KLSAoVUlUYWJsZVZpZXdDZWxsICopdGFibGVWaWV3OihVSVRhYmxlVmlldyAqKXR2IGNlbGxGb3JSb3dBdEluZGV4UGF0aDooTlNJbmRleFBhdGggKilpcCB7CiAgICBVSVRhYmxlVmlld0NlbGwgKmNlbGwgPSBbdHYgZGVxdWV1ZVJldXNhYmxlQ2VsbFdpdGhJZGVudGlmaWVyOkAiYyJdOwogICAgaWYgKCFjZWxsKSBjZWxsID0gW1tVSVRhYmxlVmlld0NlbGwgYWxsb2NdIGluaXRXaXRoU3R5bGU6VUlUYWJsZVZpZXdDZWxsU3R5bGVTdWJ0aXRsZSByZXVzZUlkZW50aWZpZXI6QCJjIl07CiAgICBESlR3ZWFrICp0ID0gW0RKVHdlYWtTdG9yZSBzaGFyZWRdLnR3ZWFrc1tpcC5yb3ddOwogICAgY2VsbC50ZXh0TGFiZWwudGV4dCA9IHQubmFtZTsgY2VsbC5kZXRhaWxUZXh0TGFiZWwudGV4dCA9IHQuZGV0YWlsOwogICAgY2VsbC50ZXh0TGFiZWwudGV4dENvbG9yID0gVUlDb2xvci53aGl0ZUNvbG9yOwogICAgY2VsbC5kZXRhaWxUZXh0TGFiZWwudGV4dENvbG9yID0gW1VJQ29sb3IgY29sb3JXaXRoV2hpdGU6MSBhbHBoYTowLjQ1XTsKICAgIGNlbGwuYmFja2dyb3VuZENvbG9yID0gW1VJQ29sb3IgY29sb3JXaXRoV2hpdGU6MSBhbHBoYTowLjA3XTsKICAgIFVJU3dpdGNoICpzdyA9IFtVSVN3aXRjaCBuZXddOyBzdy5vbiA9IHQuZW5hYmxlZDsgc3cudGFnID0gaXAucm93OwogICAgc3cub25UaW50Q29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhSZWQ6MC4zMyBncmVlbjowLjQyIGJsdWU6MS4wIGFscGhhOjFdOwogICAgW3N3IGFkZFRhcmdldDpzZWxmIGFjdGlvbjpAc2VsZWN0b3IodG9nZ2xlVHdlYWs6KSBmb3JDb250cm9sRXZlbnRzOlVJQ29udHJvbEV2ZW50VmFsdWVDaGFuZ2VkXTsKICAgIGNlbGwuYWNjZXNzb3J5VmlldyA9IHN3OyBjZWxsLnNlbGVjdGlvblN0eWxlID0gVUlUYWJsZVZpZXdDZWxsU2VsZWN0aW9uU3R5bGVOb25lOwogICAgcmV0dXJuIGNlbGw7Cn0KLSAodm9pZCl0b2dnbGVUd2VhazooVUlTd2l0Y2ggKilzdyB7IFtESlR3ZWFrU3RvcmUgc2hhcmVkXS50d2Vha3Nbc3cudGFnXS5lbmFibGVkID0gc3cub247IH0KQGVuZAo=' | base64 -d > "$ROOT/Settings/DJChangesViewController.m"
+
+          # Settings/DJMobileJesterViewController.h
+          cat > "$ROOT/Settings/DJMobileJesterViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJMobileJesterViewController : UIViewController
+          @end
+          EOF
+
+          # Settings/DJMobileJesterViewController.m
+          cat > "$ROOT/Settings/DJMobileJesterViewController.m" << 'EOF'
+          #import "DJMobileJesterViewController.h"
+          #import "../DJTweakStore.h"
+          @interface DJMobileJesterViewController () <UITableViewDataSource, UITableViewDelegate>
+          @property (nonatomic, strong) UITableView *table;
+          @end
+          @implementation DJMobileJesterViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.view.backgroundColor = UIColor.clearColor;
+              self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+              self.table.backgroundColor = UIColor.clearColor;
+              self.table.dataSource = self; self.table.delegate = self;
+              [self.view addSubview:self.table];
+          }
+          - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; self.table.frame = self.view.bounds; }
+          - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 2; }
+          - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
+              return s==0 ? @"Kernel Method" : @"Options";
+          }
+          - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return 2; }
+          - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+              UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"mj"];
+              if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"mj"];
+              cell.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+              cell.textLabel.textColor = UIColor.whiteColor;
+              DJTweakStore *store = [DJTweakStore shared];
+              if (ip.section == 0) {
+                  cell.textLabel.text = ip.row==0 ? @"bad_queue (default)" : @"PUAF/smith";
+                  cell.accessoryType = (store.kernelMethod == ip.row) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+                  cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+              } else {
+                  cell.textLabel.text = ip.row==0 ? @"Tweak Injection" : @"Hide Jailbreak";
+                  UISwitch *sw = [UISwitch new]; sw.tag = ip.row;
+                  sw.on = ip.row==0 ? store.tweakInjection : store.hideJB;
+                  sw.onTintColor = [UIColor colorWithRed:0.33 green:0.42 blue:1 alpha:1];
+                  [sw addTarget:self action:@selector(toggleOption:) forControlEvents:UIControlEventValueChanged];
+                  cell.accessoryView = sw; cell.selectionStyle = UITableViewCellSelectionStyleNone;
+              }
+              return cell;
+          }
+          - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+              [tv deselectRowAtIndexPath:ip animated:YES];
+              if (ip.section != 0) return;
+              [DJTweakStore shared].kernelMethod = (DJKernelMethod)ip.row;
+              [tv reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+          }
+          - (void)toggleOption:(UISwitch *)sw {
+              if (sw.tag==0) [DJTweakStore shared].tweakInjection = sw.on;
+              else           [DJTweakStore shared].hideJB = sw.on;
+          }
+          @end
+          EOF
+
+          # Settings/DJPostBoardViewController.h
+          cat > "$ROOT/Settings/DJPostBoardViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJPostBoardViewController : UIViewController
+          @end
+          EOF
+
+          # Settings/DJPostBoardViewController.m
+          cat > "$ROOT/Settings/DJPostBoardViewController.m" << 'EOF'
+          #import "DJPostBoardViewController.h"
+          #import "../DJTweakStore.h"
+          @interface DJPostBoardViewController () <UITableViewDataSource, UITableViewDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+          @property (nonatomic, strong) UITableView *table;
+          @end
+          @implementation DJPostBoardViewController
+          - (void)viewDidLoad {
+              [super viewDidLoad];
+              self.view.backgroundColor = UIColor.clearColor;
+              self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+              self.table.backgroundColor = UIColor.clearColor;
+              self.table.dataSource = self; self.table.delegate = self;
+              [self.view addSubview:self.table];
+          }
+          - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; self.table.frame = self.view.bounds; }
+          - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 2; }
+          - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
+              return s==0 ? @"PPL Bypass" : @"Wallpaper";
+          }
+          - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return 1; }
+          - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+              UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"pb"];
+              if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"pb"];
+              cell.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+              cell.textLabel.textColor = UIColor.whiteColor;
+              if (ip.section==0) {
+                  cell.textLabel.text = @"Enable PPL Bypass";
+                  UISwitch *sw = [UISwitch new]; sw.on = [DJTweakStore shared].pplBypass;
+                  sw.onTintColor = [UIColor colorWithRed:0.33 green:0.42 blue:1 alpha:1];
+                  [sw addTarget:self action:@selector(togglePPL:) forControlEvents:UIControlEventValueChanged];
+                  cell.accessoryView = sw; cell.selectionStyle = UITableViewCellSelectionStyleNone;
+              } else {
+                  cell.textLabel.text = [DJTweakStore shared].wallpaper ? @"Wallpaper Selected ✓" : @"Choose Wallpaper…";
+                  cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                  cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+              }
+              return cell;
+          }
+          - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+              [tv deselectRowAtIndexPath:ip animated:YES];
+              if (ip.section!=1) return;
+              UIImagePickerController *picker = [UIImagePickerController new];
+              picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary; picker.delegate = self;
+              [self presentViewController:picker animated:YES completion:nil];
+          }
+          - (void)togglePPL:(UISwitch *)sw { [DJTweakStore shared].pplBypass = sw.on; }
+          - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info {
+              UIImage *img = info[UIImagePickerControllerOriginalImage];
+              if (img) [DJTweakStore shared].wallpaper = img;
+              [picker dismissViewControllerAnimated:YES completion:^{ [self.table reloadData]; }];
+          }
+          - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
+              [picker dismissViewControllerAnimated:YES completion:nil];
+          }
+          @end
+          EOF
+
+          # Settings/DJFileExplorerViewController.h
+          cat > "$ROOT/Settings/DJFileExplorerViewController.h" << 'EOF'
+          #import <UIKit/UIKit.h>
+          @interface DJFileExplorerViewController : UIViewController
+          @end
+          EOF
+
+          # Settings/DJFileExplorerViewController.m - b64 for NSArray generics
+          echo 'I2ltcG9ydCAiREpGaWxlRXhwbG9yZXJWaWV3Q29udHJvbGxlci5oIgojaW1wb3J0ICIuLi9ESlR3ZWFrU3RvcmUuaCIKI2ltcG9ydCAiLi4vRXhwbG9pdC9iYWRfcXVlcnkuaCIKQGludGVyZmFjZSBESkZpbGVFeHBsb3JlclZpZXdDb250cm9sbGVyICgpIDxVSVRhYmxlVmlld0RhdGFTb3VyY2UsIFVJVGFibGVWaWV3RGVsZWdhdGU+CkBwcm9wZXJ0eSAobm9uYXRvbWljLCBzdHJvbmcpIFVJVGFibGVWaWV3ICp0YWJsZTsKQHByb3BlcnR5IChub25hdG9taWMsIHN0cm9uZykgTlNTdHJpbmcgKmN1cnJlbnRQYXRoOwpAcHJvcGVydHkgKG5vbmF0b21pYywgc3Ryb25nKSBOU0FycmF5PE5TU3RyaW5nICo+ICppdGVtczsKQGVuZApAaW1wbGVtZW50YXRpb24gREpGaWxlRXhwbG9yZXJWaWV3Q29udHJvbGxlcgotICh2b2lkKXZpZXdEaWRMb2FkIHsKICAgIFtzdXBlciB2aWV3RGlkTG9hZF07CiAgICBzZWxmLnZpZXcuYmFja2dyb3VuZENvbG9yID0gVUlDb2xvci5jbGVhckNvbG9yOwogICAgc2VsZi50YWJsZSA9IFtbVUlUYWJsZVZpZXcgYWxsb2NdIGluaXRXaXRoRnJhbWU6Q0dSZWN0WmVybyBzdHlsZTpVSVRhYmxlVmlld1N0eWxlUGxhaW5dOwogICAgc2VsZi50YWJsZS5iYWNrZ3JvdW5kQ29sb3IgPSBVSUNvbG9yLmNsZWFyQ29sb3I7CiAgICBzZWxmLnRhYmxlLmRhdGFTb3VyY2UgPSBzZWxmOyBzZWxmLnRhYmxlLmRlbGVnYXRlID0gc2VsZjsKICAgIHNlbGYudGFibGUuc2VwYXJhdG9yQ29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhXaGl0ZToxIGFscGhhOjAuMDhdOwogICAgW3NlbGYudmlldyBhZGRTdWJ2aWV3OnNlbGYudGFibGVdOwogICAgc2VsZi5jdXJyZW50UGF0aCA9IG5pbDsKICAgIHNlbGYuaXRlbXMgPSBicV9hY2Nlc3NpYmxlX3BhdGhzKCk7Cn0KLSAodm9pZCl2aWV3RGlkTGF5b3V0U3Vidmlld3MgeyBbc3VwZXIgdmlld0RpZExheW91dFN1YnZpZXdzXTsgc2VsZi50YWJsZS5mcmFtZSA9IHNlbGYudmlldy5ib3VuZHM7IH0KLSAoTlNJbnRlZ2VyKXRhYmxlVmlldzooVUlUYWJsZVZpZXcgKil0diBudW1iZXJPZlJvd3NJblNlY3Rpb246KE5TSW50ZWdlcilzIHsKICAgIHJldHVybiBzZWxmLmN1cnJlbnRQYXRoID8gc2VsZi5pdGVtcy5jb3VudCArIDEgOiBzZWxmLml0ZW1zLmNvdW50Owp9Ci0gKFVJVGFibGVWaWV3Q2VsbCAqKXRhYmxlVmlldzooVUlUYWJsZVZpZXcgKil0diBjZWxsRm9yUm93QXRJbmRleFBhdGg6KE5TSW5kZXhQYXRoICopaXAgewogICAgVUlUYWJsZVZpZXdDZWxsICpjZWxsID0gW3R2IGRlcXVldWVSZXVzYWJsZUNlbGxXaXRoSWRlbnRpZmllcjpAImZlIl07CiAgICBpZiAoIWNlbGwpIHsKICAgICAgICBjZWxsID0gW1tVSVRhYmxlVmlld0NlbGwgYWxsb2NdIGluaXRXaXRoU3R5bGU6VUlUYWJsZVZpZXdDZWxsU3R5bGVEZWZhdWx0IHJldXNlSWRlbnRpZmllcjpAImZlIl07CiAgICAgICAgY2VsbC50ZXh0TGFiZWwuZm9udCA9IFtVSUZvbnQgZm9udFdpdGhOYW1lOkAiTWVubG8iIHNpemU6MTJdID86IFtVSUZvbnQgbW9ub3NwYWNlZFN5c3RlbUZvbnRPZlNpemU6MTIgd2VpZ2h0OlVJRm9udFdlaWdodFJlZ3VsYXJdOwogICAgfQogICAgY2VsbC5iYWNrZ3JvdW5kQ29sb3IgPSBVSUNvbG9yLmNsZWFyQ29sb3I7CiAgICBjZWxsLnRleHRMYWJlbC50ZXh0Q29sb3IgPSBbVUlDb2xvciBjb2xvcldpdGhSZWQ6MC41IGdyZWVuOjAuOSBibHVlOjAuNiBhbHBoYToxXTsKICAgIGlmIChzZWxmLmN1cnJlbnRQYXRoICYmIGlwLnJvdyA9PSAwKSB7IGNlbGwudGV4dExhYmVsLnRleHQgPSBAIuKGkSAuLiI7IHJldHVybiBjZWxsOyB9CiAgICBOU0ludGVnZXIgaWR4ID0gc2VsZi5jdXJyZW50UGF0aCA/IGlwLnJvdy0xIDogaXAucm93OwogICAgTlNTdHJpbmcgKm5hbWUgPSBzZWxmLml0ZW1zW2lkeF07CiAgICBOU1N0cmluZyAqZnVsbCA9IHNlbGYuY3VycmVudFBhdGggPyBbc2VsZi5jdXJyZW50UGF0aCBzdHJpbmdCeUFwcGVuZGluZ1BhdGhDb21wb25lbnQ6bmFtZV0gOiBuYW1lOwogICAgQk9PTCBpc0RpciA9IE5POwogICAgW1tOU0ZpbGVNYW5hZ2VyIGRlZmF1bHRNYW5hZ2VyXSBmaWxlRXhpc3RzQXRQYXRoOmZ1bGwgaXNEaXJlY3Rvcnk6JmlzRGlyXTsKICAgIGNlbGwudGV4dExhYmVsLnRleHQgPSBpc0RpciA/IFtOU1N0cmluZyBzdHJpbmdXaXRoRm9ybWF0OkAiXFUwMDAxZjRjMSAlQCIsIG5hbWVdIDogW05TU3RyaW5nIHN0cmluZ1dpdGhGb3JtYXQ6QCIgICAlQCIsIG5hbWVdOwogICAgY2VsbC5hY2Nlc3NvcnlUeXBlID0gaXNEaXIgPyBVSVRhYmxlVmlld0NlbGxBY2Nlc3NvcnlEaXNjbG9zdXJlSW5kaWNhdG9yIDogVUlUYWJsZVZpZXdDZWxsQWNjZXNzb3J5Tm9uZTsKICAgIHJldHVybiBjZWxsOwp9Ci0gKHZvaWQpdGFibGVWaWV3OihVSVRhYmxlVmlldyAqKXR2IGRpZFNlbGVjdFJvd0F0SW5kZXhQYXRoOihOU0luZGV4UGF0aCAqKWlwIHsKICAgIFt0diBkZXNlbGVjdFJvd0F0SW5kZXhQYXRoOmlwIGFuaW1hdGVkOllFU107CiAgICBpZiAoc2VsZi5jdXJyZW50UGF0aCAmJiBpcC5yb3cgPT0gMCkgewogICAgICAgIEJPT0wgaXNSb290ID0gTk87CiAgICAgICAgZm9yIChOU1N0cmluZyAqciBpbiBicV9hY2Nlc3NpYmxlX3BhdGhzKCkpIGlmIChbciBpc0VxdWFsVG9TdHJpbmc6c2VsZi5jdXJyZW50UGF0aF0pIHsgaXNSb290PVlFUzsgYnJlYWs7IH0KICAgICAgICBpZiAoaXNSb290KSB7IHNlbGYuY3VycmVudFBhdGggPSBuaWw7IHNlbGYuaXRlbXMgPSBicV9hY2Nlc3NpYmxlX3BhdGhzKCk7IH0KICAgICAgICBlbHNlIHsgc2VsZi5jdXJyZW50UGF0aCA9IFtzZWxmLmN1cnJlbnRQYXRoIHN0cmluZ0J5RGVsZXRpbmdMYXN0UGF0aENvbXBvbmVudF07IFtzZWxmIGxvYWREaXI6c2VsZi5jdXJyZW50UGF0aF07IH0KICAgICAgICBbc2VsZi50YWJsZSByZWxvYWREYXRhXTsgcmV0dXJuOwogICAgfQogICAgTlNJbnRlZ2VyIGlkeCA9IHNlbGYuY3VycmVudFBhdGggPyBpcC5yb3ctMSA6IGlwLnJvdzsKICAgIE5TU3RyaW5nICpuYW1lID0gc2VsZi5pdGVtc1tpZHhdOwogICAgTlNTdHJpbmcgKmZ1bGwgPSBzZWxmLmN1cnJlbnRQYXRoID8gW3NlbGYuY3VycmVudFBhdGggc3RyaW5nQnlBcHBlbmRpbmdQYXRoQ29tcG9uZW50Om5hbWVdIDogbmFtZTsKICAgIEJPT0wgaXNEaXIgPSBOTzsKICAgIFtbTlNGaWxlTWFuYWdlciBkZWZhdWx0TWFuYWdlcl0gZmlsZUV4aXN0c0F0UGF0aDpmdWxsIGlzRGlyZWN0b3J5OiZpc0Rpcl07CiAgICBpZiAoaXNEaXIpIHsgc2VsZi5jdXJyZW50UGF0aCA9IGZ1bGw7IFtzZWxmIGxvYWREaXI6ZnVsbF07IFtzZWxmLnRhYmxlIHJlbG9hZERhdGFdOyB9Cn0KLSAodm9pZClsb2FkRGlyOihOU1N0cmluZyAqKXBhdGggewogICAgTlNFcnJvciAqZXJyID0gbmlsOwogICAgTlNBcnJheTxOU1N0cmluZyAqPiAqYyA9IFtbTlNGaWxlTWFuYWdlciBkZWZhdWx0TWFuYWdlcl0gY29udGVudHNPZkRpcmVjdG9yeUF0UGF0aDpwYXRoIGVycm9yOiZlcnJdOwogICAgc2VsZi5pdGVtcyA9IGMgPzogQFtdOwp9CkBlbmQK' | base64 -d > "$ROOT/Settings/DJFileExplorerViewController.m"
+
+          # main.m
+          cat > "$ROOT/main.m" << 'EOF'
+          #import <UIKit/UIKit.h>
+          #import "AppDelegate.h"
+          int main(int argc, char *argv[]) {
+              @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class])); }
+          }
+          EOF
+
+      - name: Write project.yml
+        run: |
+          cat > "project.yml" << 'EOF'
+          name: DopamineJester
+          options:
+            bundleIdPrefix: com.sussy
+            deploymentTarget:
+              iOS: "14.0"
+            xcodeVersion: "16"
+          settings:
+            base:
+              CLANG_ENABLE_OBJC_ARC: YES
+              PRODUCT_BUNDLE_IDENTIFIER: com.sussy.dopaminejester
+              INFOPLIST_FILE: DopamineJester/Info.plist
+              CODE_SIGN_ENTITLEMENTS: DopamineJester/DopamineJester.entitlements
+              TARGETED_DEVICE_FAMILY: "1,2"
+          targets:
+            DopamineJester:
+              type: application
+              platform: iOS
+              deploymentTarget: "14.0"
+              sources:
+                - path: DopamineJester
+                  excludes:
+                    - "**/*.md"
+                    - "**/*.plist"
+                    - "**/*.entitlements"
+          EOF
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build IPA
+        run: |
+          xcodebuild \
+            -project DopamineJester.xcodeproj \
+            -scheme DopamineJester \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            -derivedDataPath build
+
+          APP=$(find build -name "DopamineJester.app" | head -1)
+          mkdir -p Payload
+          cp -r "$APP" Payload/
+          zip -r DopamineJester.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DopamineJester
+          path: DopamineJester.ipa
